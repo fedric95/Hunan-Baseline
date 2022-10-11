@@ -1,7 +1,8 @@
-import os
+import os.path
 from useg.utils import isimage
 import numpy as np
-
+import skimage.io
+import skimage.segmentation
 
 def read_dataset(input_dir, sensor, split):
     
@@ -25,28 +26,36 @@ def read_dataset(input_dir, sensor, split):
     input_files = [os.path.join(input_dir, sensor, file) for file in input_files]
     return(input_files, label_files)
 
+def presegment(input_files, segmentation_directory, segmentation_args, force = False):
+    preseg_files = []
+    if(os.path.exists(segmentation_directory)==False or force==True):
+        if(os.path.exists(segmentation_directory)==False):
+            os.mkdir(segmentation_directory)
 
-class HunanTransform:
-    def __init__(self):
-        self.igbp2hunan = np.array([255, 0, 1, 2, 1, 3, 4, 6, 6, 5, 6, 7, 255])
-    def __call__(self, out):
-        out['label'][out['label'] == 255] = 12
-        out['label'] = self.igbp2hunan[out['label']]
-        out['image'] = out['image'][[3,2,1], :, :] #True Color
-        
-        out['label'][out['label']==7]=255
-        out['label'][out['label']==255] = 0
+        for i in range(len(input_files)):
+            
+            image = skimage.io.imread(input_files[i])
+            image = image[:, :, [3,2,1]]
+            for c in range(image.shape[-1]):
+                image[:, :, c] = (image[:, :, c]-image[:, :, c].min())/(image[:, :, c].max()-image[:, :, c].min())
+            preseg = skimage.segmentation.slic(image, **segmentation_args)
 
-        out['label'][out['label']==2] = 6 # grassland -> others
-        out['label'][out['label']==3] = 6 # wetland -> others
-        out['label'][out['label']==5] = 6 # bare lands -> others
+            preseg_path = os.path.join(segmentation_directory, 'image_'+str(i)+'.tif')
+            skimage.io.imsave(preseg_path, preseg)
+            assert np.prod(preseg==skimage.io.imread(preseg_path))==1, 'I/O error'
 
-        out['label'][out['label']==4] = 2
-        out['label'][out['label']==6] = 3
 
-        out['mask'] = np.isin(out['label'], [0,1,2,3,4,5,6])
 
-        return(out)
+            preseg_files.append(preseg_path)
+    else:
+        print('Segmentation results already exists')
+        for i in range(len(input_files)):
+            preseg_path = os.path.join(segmentation_directory, 'image_'+str(i)+'.tif')
+            preseg_files.append(preseg_path)
+    
+    return(preseg_files)
+
+
 
 
 
