@@ -20,12 +20,13 @@ import sklearn.metrics
 class PLSMPModel(pl.LightningModule):
     def __init__(self, args_smp, out_chanels, class_names = None):
         super(PLSMPModel, self).__init__()
+        self.save_hyperparameters()
         self.model = smp.Unet(**args_smp, classes=out_chanels)
         self.out_chanels = out_chanels
         # cross entropy loss definition
         self.loss = nn.CrossEntropyLoss(reduction='none')
         
-        self.label_colours = np.random.randint(255,size=(100,3))
+        self.label_colours = np.random.randint(255,size=(self.out_chanels,3))
 
     def forward(self, x):
         return(self.model(x))
@@ -51,22 +52,15 @@ class PLSMPModel(pl.LightningModule):
         im_label = label[0, : ,:]
         im_output = output[0, : ,:]
 
-        import matplotlib.pyplot as plt
-        plt.imshow(im_label, vmin=0, vmax=6)
-        plt.show()
 
-
-        im_label = np.array([self.label_colours[ c % self.out_chanels ] for c in im_label])/255
-        im_output = np.array([self.label_colours[ c % self.out_chanels ] for c in im_output])/255
         im_input = np.transpose(image[0].cpu().numpy(),[1,2,0])
-
         for c in range(im_input.shape[-1]):
             im_input[:, :, c] = (im_input[:, :, c]-im_input[:, :, c].min())/(im_input[:, :, c].max()-im_input[:, :, c].min())
         
 
         logimage(self.logger, step+'/input',  im_input,  self.global_step)
-        logimage(self.logger, step+'/output', im_output, self.global_step)
-        logimage(self.logger, step+'/label',  im_label,  self.global_step)
+        logimage(self.logger, step+'/output', im_output, self.global_step, self.label_colours)
+        logimage(self.logger, step+'/label',  im_label,  self.global_step, self.label_colours)
         logimage(self.logger, step+'/mask',   np.expand_dims(mask[0, :, :], -1),  self.global_step)
 
 
@@ -77,9 +71,9 @@ class PLSMPModel(pl.LightningModule):
         accuracy = sklearn.metrics.accuracy_score(label, output)
         
         for i in range(self.out_chanels):
-            self.log(step+'/f1_'+str(i), f1[i], prog_bar=False)
-        self.log(step+'/f1', f1.mean(), prog_bar=True)
-        self.log(step+'/accuracy', accuracy, prog_bar=True)
+            self.log(step+'/f1_'+str(i), f1[i], prog_bar=False, on_epoch=True)
+        self.log(step+'/f1', f1.mean(), prog_bar=True, on_epoch=True)
+        self.log(step+'/accuracy', accuracy, prog_bar=True, on_epoch=True)
         
         return(l)
 
@@ -95,7 +89,7 @@ class PLSMPModel(pl.LightningModule):
 
 args_smp = {
     'encoder_name': 'resnet18',
-    'encoder_weights': None,
+    'encoder_weights': 'imagenet',
     'in_channels': 3
 }
 use_gpu = 1
@@ -113,10 +107,13 @@ val_input_files, val_label_files = read_dataset(r'C:/Users/federico/Downloads/Hu
 train_dataset = Dataset(train_input_files, label_files = train_label_files, transform=transform)
 val_dataset   = Dataset(val_input_files, label_files = val_label_files, transform=transform)
 
+
 model = PLSMPModel(args_smp = args_smp, out_chanels=out_chanels)
 
+
+
 if(logger=='TensorBoardLogger'):
-    logger = TensorBoardLogger('logs')
+    logger = TensorBoardLogger(save_dir = 'logs', name = 'supervised')
 elif(logger=='NeptuneLogger'):
     logger = NeptuneLogger(prefix = '', api_key=os.environ['NEPTUNE_API_TOKEN'], project=os.environ['NEPTUNE_PROJECT'])
 
